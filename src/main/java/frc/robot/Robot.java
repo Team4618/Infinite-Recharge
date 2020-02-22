@@ -13,6 +13,7 @@ import edu.wpi.first.wpilibj.GenericHID.Hand;
 import edu.wpi.first.wpilibj.drive.DifferentialDrive;
 import edu.wpi.first.wpilibj.util.Color;
 import frc.robot.subsystems.Drive;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.I2C;
 import edu.wpi.first.wpilibj.Servo;
 import com.ctre.phoenix.motorcontrol.can.WPI_TalonSRX;
@@ -30,26 +31,35 @@ public class Robot extends TimedRobot {
 
   private XboxController controller;
 
+  // shooter
   private WPI_TalonSRX[] shooter = { new WPI_TalonSRX(10), new WPI_TalonSRX(11) };
   private double shooterSpeed = 0;
+  int shooterState = 0; // 0 = both, 1 = bottom, 2 = top, 3 = off
 
+  // servo
   private Servo twoWire;
 
-  final int[] colourBlue = {0, 255, 255};
-  final int[] colourGreen = {0, 255, 0};
-  final int[] colourYellow = {255, 255, 0};
-  final int[] colourRed = {255, 0, 0};
+  // disk spinner
+  final Color colourBlue = new Color(0, 1, 1);
+  final Color colourGreen = new Color(0, 1, 0);
+  final Color colourYellow = new Color(1, 1, 0);
+  final Color colourRed = new Color(1, 0, 0);
+  private boolean spinning;
+  private int colourCount = 0;
+  private Color lastColour = null;
+  private Color colourToFind;
   private ColorSensorV3 colourSensor = new ColorSensorV3(I2C.Port.kOnboard);
+  private WPI_VictorSPX diskSpinner = new WPI_VictorSPX(50);
 
+  // drive
   private DifferentialDrive robotDrive;
   private Drive drive;
 
+  // intake
   private WPI_VictorSPX[] intakeMotors = { new WPI_VictorSPX(41), new WPI_VictorSPX(42) };
   private WPI_VictorSPX intakeWrist = new WPI_VictorSPX(40);
   private int intakeState = 0; // 0=up, 1 = falling, 2 = down, 3 = rising, starts up
   private long intakeTime;
-
-  int shooterState = 0; // 0 = both, 1 = bottom, 2 = top, 3 = off
 
   /**
    * This function is run when the robot is first started up and should be used
@@ -81,6 +91,8 @@ public class Robot extends TimedRobot {
   @Override
   public void autonomousInit() {
     intakeState = 0;
+    spinning = false;
+    colourCount = 0;
   }
 
   /**
@@ -93,10 +105,18 @@ public class Robot extends TimedRobot {
   /**
    * This function is called periodically during operator control.
    */
+
+  // CONTROLS
+  // X button: intake
+  // Y button: disk spinner (control pannel)
+  // A button: climb
+  // B button: shooter
+  // 2 stick drive - left stick Y, right stick X
   @Override
   public void teleopPeriodic() {
     double leftXValue = controller.getRawAxis(0);
     double leftYValue = controller.getRawAxis(1); // same for left
+    double rightXValue = controller.getRawAxis(4);
     double rightYValue = controller.getRawAxis(5); // should be the y-axis of right joystick
 
     // double toSet = 0.44 * leftYValue + 0.5;
@@ -152,7 +172,65 @@ public class Robot extends TimedRobot {
       intakeMotors[1].set(0d);
     }
 
-    robotDrive.arcadeDrive(leftXValue, leftYValue);
+    //
+    // colour picker thingy controls
+    //
+    String gameColour = DriverStation.getInstance().getGameSpecificMessage();
+    Color readColour = colourSensor.getColor();
+
+    if (controller.getYButtonPressed()) { // start the spinning process
+      // in if statement so spinning doesn't accidentally get set to false
+      spinning = true;
+
+      if (gameColour.length() > 0) {
+        switch (gameColour.charAt(0)) {
+          case 'B':
+            colourToFind = colourBlue;
+            break;
+          case 'G':
+            colourToFind = colourGreen;
+            break;
+          case 'R':
+            colourToFind = colourRed;
+            break;
+          case 'Y':
+            colourToFind = colourYellow;
+            break;
+          default:
+            // well fuck me i guess
+            colourToFind = null;
+            break;
+        }
+      }
+    }
+
+    if (spinning) {
+      if (gameColour.length() <= 0) { // phase 1, we just want to spin
+        // basically spin it until the colour changes 24 times
+
+        // check if colour has changed since last time
+        if (readColour == lastColour) {
+          colourCount++;
+        }
+
+        if (colourCount <= 24) { // we've done 3 rotations, stop
+          diskSpinner.set(0d);
+          spinning = false;
+          colourCount = 0;
+        }
+
+      } else if (colourToFind != null) { // phase 2, we need to match colour
+        if (readColour == colourToFind) {
+          // we've found the colour, stop spinning
+          diskSpinner.set(0d);
+          spinning = false;
+        }
+      }
+    }
+
+    diskSpinner.set(spinning ? 0.5d : 0d);
+
+    robotDrive.arcadeDrive(rightXValue, leftYValue); // make robot move
 
     // System.out.println("Bottom speed: " + shooter[0].get());
     // System.out.println("Top speed: " + shooter[1].get());
