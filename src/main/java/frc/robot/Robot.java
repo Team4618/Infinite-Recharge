@@ -15,6 +15,7 @@ import edu.wpi.first.wpilibj.util.Color;
 import frc.robot.subsystems.Drive;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.I2C;
+import edu.wpi.first.wpilibj.Joystick;
 import edu.wpi.first.wpilibj.Servo;
 import com.ctre.phoenix.motorcontrol.can.WPI_TalonSRX;
 import com.ctre.phoenix.motorcontrol.can.WPI_VictorSPX;
@@ -30,6 +31,7 @@ import com.revrobotics.ColorSensorV3;
 public class Robot extends TimedRobot {
 
   private XboxController controller;
+  private Joystick joystick;
 
   // shooter
   private WPI_TalonSRX[] shooter = { new WPI_TalonSRX(10), new WPI_TalonSRX(11) };
@@ -49,7 +51,7 @@ public class Robot extends TimedRobot {
   private Color lastColour = null;
   private Color colourToFind;
   private ColorSensorV3 colourSensor = new ColorSensorV3(I2C.Port.kOnboard);
-  private WPI_VictorSPX diskSpinner = new WPI_VictorSPX(50);
+  private WPI_VictorSPX diskSpinner = new WPI_VictorSPX(30);
 
   // drive
   private DifferentialDrive robotDrive;
@@ -68,6 +70,7 @@ public class Robot extends TimedRobot {
   @Override
   public void robotInit() {
     controller = new XboxController(0);
+    joystick = new Joystick(1);
     drive = new Drive();
 
     robotDrive = new DifferentialDrive(drive.leftTalon, drive.rightTalon);
@@ -84,8 +87,6 @@ public class Robot extends TimedRobot {
    */
   @Override
   public void robotPeriodic() {
-    Color foundColour = colourSensor.getColor();
-    System.out.println("r: " + foundColour.red + "\ng: " + foundColour.green + "\nb: " + foundColour.blue);
   }
 
   @Override
@@ -112,12 +113,22 @@ public class Robot extends TimedRobot {
   // A button: climb
   // B button: shooter
   // 2 stick drive - left stick Y, right stick X
+  //
+  // OVERRIDES
+  // Button 2: shooter (y)
+  // Button 3: intake (y)
+  // Button 4: ball track (x)
+  // Button 5 : disk spinner (y)
+
   @Override
   public void teleopPeriodic() {
+    // controller and joystick axises
     double leftXValue = controller.getRawAxis(0);
-    double leftYValue = controller.getRawAxis(1); // same for left
+    double leftYValue = controller.getRawAxis(1);
     double rightXValue = controller.getRawAxis(4);
-    double rightYValue = controller.getRawAxis(5); // should be the y-axis of right joystick
+    double rightYValue = controller.getRawAxis(5);
+    double joystickX = joystick.getRawAxis(0);
+    double joystickY = joystick.getRawAxis(1);
 
     // double toSet = 0.44 * leftYValue + 0.5;
 
@@ -139,103 +150,122 @@ public class Robot extends TimedRobot {
       shooterSpeed = rightYValue;
     }
 
-    if (shooterState == 0 || shooterState == 1) {
-      shooter[0].set(shooterSpeed);
-    }
-    if (shooterState == 0 || shooterState == 2) {
-      shooter[1].set(shooterSpeed);
+    // manual override
+    if (joystick.getRawButton(1)) {
+      shooter[0].set(joystickY);
+      shooter[1].set(joystickY);
+    } else {
+      // see delclaration for meaning of states
+      if (shooterState == 0 || shooterState == 1) {
+        shooter[0].set(shooterSpeed);
+      }
+      if (shooterState == 0 || shooterState == 2) {
+        shooter[1].set(shooterSpeed);
+      }
     }
 
     //
     // intake controls
     //
-    if (intakeState == 1 || intakeState == 3) {
-      if (System.currentTimeMillis() >= intakeTime + 1000) {
-        intakeWrist.set(0d);
-        if (intakeState == 1) {
-          intakeState = 2;
-        } else if (intakeState == 3) {
-          intakeState = 0;
-        }
-      } else {
-        intakeWrist.set(intakeState - 2d);
+    if (controller.getXButtonPressed()) {
+      intakeState = intakeState >= 1 ? 0 : 1;
+    }
+
+    // manual overrides
+    if (joystick.getRawButton(2) || joystick.getRawButton(3)) {
+      if (joystick.getRawButton(2)) {
+        intakeMotors[0].set(joystickY);
       }
-    } else if (controller.getXButtonPressed() && (intakeState == 0 || intakeState == 2)) {
-      intakeState += 1;
-      intakeTime = System.currentTimeMillis();
-      intakeWrist.set(intakeState - 2d); // -1 if 1, 1 if 3
-    } else if (intakeState == 2) {
-      intakeMotors[0].set(0.75d);
-      intakeMotors[1].set(0.2d);
-    } else if (intakeState == 0) {
-      intakeMotors[0].set(0d);
-      intakeMotors[1].set(0d);
+      if (joystick.getRawButton(3)) {
+        intakeMotors[1].set(joystickX);
+      }
+    } else {
+      if (intakeState == 1) {
+        // intake for me
+        intakeMotors[0].set(-0.75d);
+        intakeMotors[1].set(0.5d);
+      } else if (intakeState == 0) {
+        intakeMotors[0].set(0d);
+        intakeMotors[1].set(0d);
+      }
     }
 
     //
     // colour picker thingy controls
     //
+
     String gameColour = DriverStation.getInstance().getGameSpecificMessage();
     Color readColour = colourSensor.getColor();
 
-    if (controller.getYButtonPressed()) { // start the spinning process
-      // in if statement so spinning doesn't accidentally get set to false
-      spinning = true;
-
-      if (gameColour.length() > 0) {
-        switch (gameColour.charAt(0)) {
-          case 'B':
-            colourToFind = colourBlue;
-            break;
-          case 'G':
-            colourToFind = colourGreen;
-            break;
-          case 'R':
-            colourToFind = colourRed;
-            break;
-          case 'Y':
-            colourToFind = colourYellow;
-            break;
-          default:
-            // well fuck me i guess
-            colourToFind = null;
-            break;
-        }
-      }
+    if (gameColour.length() > 0) {
+      System.out.println(gameColour);
     }
 
-    if (spinning) {
-      if (gameColour.length() <= 0) { // phase 1, we just want to spin
-        // basically spin it until the colour changes 24 times
+    if (joystick.getRawButton(4)) { // manual override
+      diskSpinner.set(joystickY);
+    } else {
 
-        // check if colour has changed since last time
-        if (readColour == lastColour) {
-          colourCount++;
-        }
+      if (controller.getYButtonPressed()) { // start the spinning process
+        // in if statement so spinning doesn't accidentally get set to false
+        spinning = true;
 
-        if (colourCount <= 24) { // we've done 3 rotations, stop
-          diskSpinner.set(0d);
-          spinning = false;
-          colourCount = 0;
-        }
-
-      } else if (colourToFind != null) { // phase 2, we need to match colour
-        if (readColour == colourToFind) {
-          // we've found the colour, stop spinning
-          diskSpinner.set(0d);
-          spinning = false;
+        if (gameColour.length() > 0) {
+          switch (gameColour.charAt(0)) {
+            case 'B':
+              colourToFind = colourBlue;
+              break;
+            case 'G':
+              colourToFind = colourGreen;
+              break;
+            case 'R':
+              colourToFind = colourRed;
+              break;
+            case 'Y':
+              colourToFind = colourYellow;
+              break;
+            default:
+              // well fuck me i guess
+              colourToFind = null;
+              break;
+          }
         }
       }
+
+      if (spinning) {
+        if (gameColour.length() <= 0) { // phase 1, we just want to spin
+          // basically spin it until the colour changes 24 times
+
+          // check if colour has changed since last time
+          if (readColour == lastColour) {
+            colourCount++;
+          }
+
+          if (colourCount <= 24) { // we've done 3 rotations, stop
+            diskSpinner.set(0d);
+            spinning = false;
+            colourCount = 0;
+          }
+
+        } else if (colourToFind != null) { // phase 2, we need to match colour
+          if (readColour == colourToFind) {
+            // we've found the colour, stop spinning
+            diskSpinner.set(0d);
+            spinning = false;
+          }
+        }
+      }
+
+      diskSpinner.set(spinning ? 0.5d : 0d);
     }
 
-    diskSpinner.set(spinning ? 0.5d : 0d);
+    if (!controller.getBumperPressed(Hand.kLeft)) {
+      robotDrive.arcadeDrive(-rightXValue, -leftYValue); // make robot move
+    }
 
-    robotDrive.arcadeDrive(rightXValue, leftYValue); // make robot move
-
-    // System.out.println("Bottom speed: " + shooter[0].get());
-    // System.out.println("Top speed: " + shooter[1].get());
-    // System.out.println("Sent speed: " + shooterSpeed);
-    // System.out.println();
+    System.out.println("Bottom speed: " + shooter[0].get());
+    System.out.println("Top speed: " + shooter[1].get());
+    System.out.println("Sent speed: " + shooterSpeed);
+    System.out.println();
   }
 
   /**
