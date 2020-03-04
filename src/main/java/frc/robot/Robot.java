@@ -10,14 +10,15 @@ package frc.robot;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj.XboxController;
 import edu.wpi.first.wpilibj.GenericHID.Hand;
+import edu.wpi.first.wpilibj.GenericHID.RumbleType;
 import edu.wpi.first.wpilibj.drive.DifferentialDrive;
 import edu.wpi.first.wpilibj.util.Color;
-import frc.robot.subsystems.Drive;
+import frc.robot.subsystems.*;
+import edu.wpi.first.wpilibj.AnalogInput;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.I2C;
 import edu.wpi.first.wpilibj.Joystick;
 import edu.wpi.first.wpilibj.Servo;
-import com.ctre.phoenix.motorcontrol.can.WPI_TalonSRX;
 import com.ctre.phoenix.motorcontrol.can.WPI_VictorSPX;
 import com.revrobotics.ColorSensorV3;
 
@@ -34,9 +35,8 @@ public class Robot extends TimedRobot {
   private Joystick joystick;
 
   // shooter
-  private WPI_TalonSRX[] shooter = { new WPI_TalonSRX(10), new WPI_TalonSRX(11) };
-  private double shooterSpeed = 0;
-  int shooterState = 0; // 0 = both, 1 = bottom, 2 = top, 3 = off
+  private Shooter shooter;
+  private double shooterSpeed;
 
   // servo
   private Servo twoWire;
@@ -60,6 +60,7 @@ public class Robot extends TimedRobot {
   // intake
   private WPI_VictorSPX[] intakeMotors = { new WPI_VictorSPX(41), new WPI_VictorSPX(42) };
   private WPI_VictorSPX intakeWrist = new WPI_VictorSPX(40);
+  private AnalogInput wristPotentiometer = new AnalogInput(0);
   private int intakeState = 0; // 0=up, 1 = falling, 2 = down, 3 = rising, starts up
   private long intakeTime;
 
@@ -74,6 +75,8 @@ public class Robot extends TimedRobot {
     drive = new Drive();
 
     robotDrive = new DifferentialDrive(drive.leftTalon, drive.rightTalon);
+
+    shooter = new Shooter();
   }
 
   /**
@@ -87,6 +90,8 @@ public class Robot extends TimedRobot {
    */
   @Override
   public void robotPeriodic() {
+    controller.setRumble(RumbleType.kLeftRumble, 0.2d);
+    controller.setRumble(RumbleType.kRightRumble, 0.2d);
   }
 
   @Override
@@ -111,14 +116,14 @@ public class Robot extends TimedRobot {
   // X button: intake
   // Y button: disk spinner (control pannel)
   // A button: climb
-  // B button: shooter
+  // B button: shooter *eventually*
   // 2 stick drive - left stick Y, right stick X
   //
   // OVERRIDES
-  // Button 2: shooter (y)
-  // Button 3: intake (y)
-  // Button 4: ball track (x)
-  // Button 5 : disk spinner (y)
+  // Button 1: shooter (y)
+  // Button 2: intake (y)
+  // Button 3: ball track (x)
+  // Button 4 : disk spinner (y)
 
   @Override
   public void teleopPeriodic() {
@@ -142,26 +147,15 @@ public class Robot extends TimedRobot {
     //
     // shooter controls
     //
-    if (controller.getBumperPressed(Hand.kRight)) { // incriment to next mode
-      shooterState = shooterState >= 3 ? 0 : shooterState + 1; // if (shooterState >= 3)
-    }
-
     if (controller.getBumper(Hand.kLeft)) { // only change speed when left bumper is pressed
       shooterSpeed = rightYValue;
     }
 
     // manual override
     if (joystick.getRawButton(1)) {
-      shooter[0].set(joystickY);
-      shooter[1].set(joystickY);
+      shooter.setSpeed(joystickY);
     } else {
-      // see delclaration for meaning of states
-      if (shooterState == 0 || shooterState == 1) {
-        shooter[0].set(shooterSpeed);
-      }
-      if (shooterState == 0 || shooterState == 2) {
-        shooter[1].set(shooterSpeed);
-      }
+      shooter.setSpeed(shooterSpeed);
     }
 
     //
@@ -258,12 +252,11 @@ public class Robot extends TimedRobot {
       diskSpinner.set(spinning ? 0.5d : 0d);
     }
 
-    if (!controller.getBumperPressed(Hand.kLeft)) {
+    if (!controller.getBumper(Hand.kLeft)) {
       robotDrive.arcadeDrive(-rightXValue, -leftYValue); // make robot move
     }
 
-    System.out.println("Bottom speed: " + shooter[0].get());
-    System.out.println("Top speed: " + shooter[1].get());
+    shooter.printSpeeds();
     System.out.println("Sent speed: " + shooterSpeed);
     System.out.println();
   }
