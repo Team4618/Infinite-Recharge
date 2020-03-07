@@ -8,6 +8,7 @@
 package frc.robot;
 
 import edu.wpi.first.wpilibj.TimedRobot;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.XboxController;
 import edu.wpi.first.wpilibj.GenericHID.Hand;
 import edu.wpi.first.wpilibj.GenericHID.RumbleType;
@@ -21,9 +22,7 @@ import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.I2C;
 import edu.wpi.first.wpilibj.Joystick;
 import edu.wpi.first.wpilibj.RobotController;
-import edu.wpi.first.wpilibj.Servo;
 
-import com.ctre.phoenix.motorcontrol.ControlMode;
 import com.ctre.phoenix.motorcontrol.can.WPI_VictorSPX;
 import com.revrobotics.ColorSensorV3;
 
@@ -44,16 +43,16 @@ public class Robot extends TimedRobot {
   private double shooterSpeed;
 
   // disk spinner
-  final Color colourBlue = new Color(0, 1, 1);
-  final Color colourGreen = new Color(0, 1, 0);
-  final Color colourYellow = new Color(1, 1, 0);
-  final Color colourRed = new Color(1, 0, 0);
-  private boolean spinning;
-  private int colourCount = 0;
-  private Color lastColour = null;
-  private Color colourToFind;
-  private ColorSensorV3 colourSensor = new ColorSensorV3(I2C.Port.kOnboard);
-  private WPI_VictorSPX diskSpinner = new WPI_VictorSPX(30);
+  // final Color colourBlue = new Color(0, 1, 1);
+  // final Color colourGreen = new Color(0, 1, 0);
+  // final Color colourYellow = new Color(1, 1, 0);
+  // final Color colourRed = new Color(1, 0, 0);
+  // private boolean spinning;
+  // private int colourCount = 0;
+  // private Color lastColour = null;
+  // private Color colourToFind;
+  // private ColorSensorV3 colourSensor = new ColorSensorV3(I2C.Port.kOnboard);
+  // private WPI_VictorSPX diskSpinner = new WPI_VictorSPX(30);
 
   // drive
   private DifferentialDrive robotDrive;
@@ -71,6 +70,9 @@ public class Robot extends TimedRobot {
   private DigitalInput dio0 = new DigitalInput(0);
   private DigitalInput dio1 = new DigitalInput(1);
 
+  DigitalInput[] dis = new DigitalInput[2];
+  AnalogInput[] ans = new AnalogInput[2];
+
   /**
    * This function is run when the robot is first started up and should be used
    * for any initialization code.
@@ -84,6 +86,11 @@ public class Robot extends TimedRobot {
     robotDrive = new DifferentialDrive(drive.leftTalon, drive.rightTalon);
 
     shooter = new Shooter();
+
+    dis[0] = new DigitalInput(2);
+    dis[1] = new DigitalInput(3);
+    ans[0] = new AnalogInput(0);
+    ans[1] = shooter.potentiometer;
   }
 
   /**
@@ -95,9 +102,6 @@ public class Robot extends TimedRobot {
    * This runs after the mode specific periodic functions, but before LiveWindow
    * and SmartDashboard integrated updating.
    */
-
-  DigitalInput[] dis = { new DigitalInput(2), new DigitalInput(3) };
-  AnalogInput[] ans = { new AnalogInput(0), new AnalogInput(1) };
 
   @Override
   public void robotPeriodic() {
@@ -128,8 +132,8 @@ public class Robot extends TimedRobot {
 
   @Override
   public void autonomousInit() {
-    spinning = false;
-    colourCount = 0;
+    // spinning = false;
+    // colourCount = 0;
     shooterSpeed = 0;
     runBallTrack = false;
     lastDIO0 = true;
@@ -151,7 +155,7 @@ public class Robot extends TimedRobot {
   // X button: intake
   // Y button: nothin
   // A button: nothin
-  // B button: shooter *eventually*???
+  // joystick button 5 : shoot / search
   // 2 stick drive - left stick Y, right stick X
   //
   // OVERRIDES
@@ -186,12 +190,19 @@ public class Robot extends TimedRobot {
     // manual override
     if (joystick.getRawButton(1)) {
       shooter.setSpeed(joystickY);
-    } else {
-      /*
-       * shooter.top.set(ControlMode.Velocity, (1 * shooterSpeed) * (4096f / 10f));
-       * shooter.bottom.set(ControlMode.Velocity, (1 * -shooterSpeed) * (4096f /
-       * 10f));
-       */
+    } else { // TODO: test software PID and get empirical data for shooter
+      shooter.top.set(shooter.topPID(10000 * shooterSpeed / 60));
+      shooter.bottom.set(shooter.bottomPID(10000 * shooterSpeed / 60));
+    }
+
+    if (shooter.locked) {
+      shooter.pidPivotToTarget();
+
+      if (joystick.getRawButton(5)) {
+        shooter.shoot();
+      }
+    } else if (joystick.getRawButton(5)) {
+      shooter.pidPivotToTarget();
     }
 
     //
@@ -281,11 +292,21 @@ public class Robot extends TimedRobot {
 
     if (!controller.getBumper(Hand.kLeft)) {
       robotDrive.arcadeDrive(-rightXValue, -leftYValue); // make robot move
+    } else {
+      robotDrive.arcadeDrive(0, 0);
     }
 
-    shooter.printSpeeds();
-    System.out.println("Sent speed: " + shooterSpeed);
-    System.out.println();
+    // shooter.printSpeeds();
+    // System.out.println("Sent speed: " + shooterSpeed);
+    // System.out.println();
+
+    // the "fun" rumble
+    double timeLeft = Timer.getMatchTime();
+    double toRumble = timeLeft <= 10 ? 1d : (-0.008d * timeLeft + 1.08d); // -x/125 + 135/125, x = timeLeft,
+                                                                          // R: {x=R|10<=x<=135}
+
+    controller.setRumble(RumbleType.kLeftRumble, toRumble);
+    controller.setRumble(RumbleType.kRightRumble, toRumble);
   }
 
   /**
